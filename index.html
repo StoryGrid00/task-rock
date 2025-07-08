@@ -46,8 +46,7 @@
     <!-- Firebase SDK v10.12.1 -->
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js';
-        import { getMessaging, getToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.12.1/firebase-messaging.js';
-        import { enableNotifications, disableNotifications } from './firebase-messaging.js';
+        import { getMessaging, getToken, deleteToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.12.1/firebase-messaging.js';
         
         // Firebase configuration
         const firebaseConfig = {
@@ -68,6 +67,67 @@
         
         console.log('Task Rock: Firebase v10.12.1 initialized');
         
+        // VAPID Key for FCM
+        const VAPID_KEY = 'BDG25rX6YAZvxsKIzfbJ0pdKdZfYF0zx4vpyy3BEH8IMjAXN50WpaPSdHPPGxIDntUEc6cpk46na4Fc89HepDts';
+        
+        // Request notification permission and get FCM token
+        const requestNotificationPermission = async () => {
+            try {
+                const permission = await Notification.requestPermission();
+                if (permission === 'granted') {
+                    const token = await getToken(messaging, {
+                        vapidKey: VAPID_KEY
+                    });
+                    console.log('FCM Token:', token);
+                    // Store token in localStorage for persistence
+                    localStorage.setItem('fcm-token', token);
+                    return token;
+                } else {
+                    console.log('Notifications permission not granted');
+                    throw new Error('Notification permission denied');
+                }
+            } catch (error) {
+                console.error('Error getting FCM token:', error);
+                throw error;
+            }
+        };
+        
+        // Enable notifications function
+        const enableNotifications = async () => {
+            return await requestNotificationPermission();
+        };
+        
+        // Disable notifications function
+        const disableNotifications = async () => {
+            try {
+                await deleteToken(messaging);
+                localStorage.removeItem('fcm-token');
+                console.log('FCM token deleted and notifications disabled');
+            } catch (error) {
+                console.error('Error disabling notifications:', error);
+                throw error;
+            }
+        };
+        
+        // Handle foreground messages
+        onMessage(messaging, (payload) => {
+            console.log('Foreground message received:', payload);
+            
+            // Show notification even when app is in foreground
+            if (payload.notification) {
+                const notificationTitle = payload.notification.title || 'Task Rock';
+                const notificationOptions = {
+                    body: payload.notification.body || 'You have a task notification',
+                    icon: '/assets/images/jerry.png',
+                    badge: '/assets/images/icon-192x192.png',
+                    tag: 'task-rock-notification',
+                    requireInteraction: true
+                };
+                
+                new Notification(notificationTitle, notificationOptions);
+            }
+        });
+        
         // Register Firebase service worker
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker
@@ -80,13 +140,12 @@
                 });
         }
         
-        // Make Firebase available globally for other scripts
+        // Make Firebase functions available globally
         window.firebaseMessaging = messaging;
         window.firebaseApp = app;
-        window.firebaseGetToken = getToken;
-        window.firebaseOnMessage = onMessage;
         window.enableNotifications = enableNotifications;
         window.disableNotifications = disableNotifications;
+        window.requestNotificationPermission = requestNotificationPermission;
     </script>
     
     <style>
@@ -859,49 +918,55 @@
             transform: scale(0.98);
         }
 
-        /* Toggle Switch */
-        .toggle-container {
-            display: flex;
-            align-items: center;
-        }
-
-        .toggle-input {
-            display: none;
-        }
-
-        .toggle-label {
+        /* Toggle Switch - iOS Style */
+        .toggle-switch {
             position: relative;
             display: inline-block;
-            width: 50px;
-            height: 28px;
-            background-color: #ccc;
-            border-radius: 14px;
-            cursor: pointer;
-            transition: background-color 0.3s ease;
+            width: 51px;
+            height: 31px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
         }
 
         .toggle-slider {
             position: absolute;
-            top: 2px;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #e5e5ea;
+            transition: .3s;
+            border-radius: 31px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 27px;
+            width: 27px;
             left: 2px;
-            width: 24px;
-            height: 24px;
+            bottom: 2px;
             background-color: white;
+            transition: .3s;
             border-radius: 50%;
-            transition: transform 0.3s ease;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
 
-        .toggle-input:checked + .toggle-label {
-            background-color: #8FEB60;
+        input:checked + .toggle-slider {
+            background-color: #34c759;
         }
 
-        .toggle-input:checked + .toggle-label .toggle-slider {
-            transform: translateX(22px);
+        input:checked + .toggle-slider:before {
+            transform: translateX(20px);
         }
 
-        .toggle-label:hover {
-            box-shadow: 0 0 0 3px rgba(143, 235, 96, 0.2);
+        .toggle-slider:hover {
+            box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.2);
         }
 
         /* Stats */
@@ -1784,15 +1849,22 @@
             <div class="section-content collapsed" id="settingsContent">
                 <div class="settings-item">
                     <div class="settings-item-header">
+                        <div class="settings-item-title">🔔 Task Notifications</div>
+                        <div class="settings-item-desc">Get notified when tasks are due soon</div>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="notificationToggle" onchange="toggleNotifications()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="settings-item">
+                    <div class="settings-item-header">
                         <div class="settings-item-title">🛍️ Share Rock Shop</div>
                         <div class="settings-item-desc">Help support us by sharing our Etsy store!</div>
                     </div>
                     <button class="share-btn" onclick="shareEtsyStore()">Share Store</button>
                 </div>
-            </div>
-        </div>
-
-    <!-- Create Task Modal -->
+            </div>  <!-- Create Task Modal -->
     <div id="createTaskModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -2571,6 +2643,10 @@
                             console.log('FCM Token obtained:', token);
                             showJerryDialog('🔔 Task notifications are now ON! I\'ll let you know when tasks are due soon!');
                             startDueTaskChecker();
+                            
+                            // Store the token for server communication if needed
+                            gameState.fcmToken = token;
+                            saveGameState();
                         })
                         .catch(error => {
                             console.error('Failed to enable notifications:', error);
@@ -2600,6 +2676,10 @@
                         .then(() => {
                             console.log('FCM notifications disabled');
                             showJerryDialog('🔕 Task notifications are now OFF. You can turn them back on anytime!');
+                            
+                            // Clear stored token
+                            delete gameState.fcmToken;
+                            saveGameState();
                         })
                         .catch(error => {
                             console.error('Failed to disable notifications:', error);

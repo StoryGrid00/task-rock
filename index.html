@@ -43,12 +43,13 @@
     <meta name="twitter:description" content="A fun task management app with Jerry the Rock, your virtual pet companion">
     <meta name="twitter:image" content="assets/images/icon-512x512.png">
     
-    <!-- Firebase SDK v9+ Modular -->
+    <!-- Firebase SDK v10.12.1 -->
     <script type="module">
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js';
-        import { getMessaging, getToken, onMessage } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging.js';
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js';
+        import { getMessaging, getToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.12.1/firebase-messaging.js';
+        import { enableNotifications, disableNotifications } from './firebase-messaging.js';
         
-        // Firebase configuration - REPLACE with your actual config
+        // Firebase configuration
         const firebaseConfig = {
             apiKey: "AIzaSyBLGmPRuqGou8cB_A9QDQ-QF7b8QI",
             authDomain: "task-rock.firebaseapp.com",
@@ -65,13 +66,27 @@
         // Initialize Firebase Cloud Messaging
         const messaging = getMessaging(app);
         
-        console.log('Task Rock: Firebase v9+ initialized');
+        console.log('Task Rock: Firebase v10.12.1 initialized');
+        
+        // Register Firebase service worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker
+                .register('/firebase-messaging-sw.js')
+                .then((registration) => {
+                    console.log('Firebase Service Worker registered:', registration.scope);
+                })
+                .catch((err) => {
+                    console.error('Firebase Service Worker registration failed:', err);
+                });
+        }
         
         // Make Firebase available globally for other scripts
         window.firebaseMessaging = messaging;
         window.firebaseApp = app;
         window.firebaseGetToken = getToken;
         window.firebaseOnMessage = onMessage;
+        window.enableNotifications = enableNotifications;
+        window.disableNotifications = disableNotifications;
     </script>
     
     <style>
@@ -2549,20 +2564,50 @@
             saveGameState();
             
             if (gameState.taskNotificationsEnabled) {
-                showJerryDialog('🔔 Task notifications are now ON! I\'ll let you know when tasks are due soon!');
-                // Request notification permission and start checking
-                requestNotificationPermission().then(permission => {
-                    if (permission === 'granted') {
-                        startDueTaskChecker();
-                    } else {
-                        showJerryDialog('🔕 Notification permission denied. Please enable notifications in your browser settings.');
-                        gameState.taskNotificationsEnabled = false;
-                        saveGameState();
-                        updateUI();
-                    }
-                });
+                // Use Firebase FCM to enable notifications
+                if (window.enableNotifications) {
+                    window.enableNotifications()
+                        .then(token => {
+                            console.log('FCM Token obtained:', token);
+                            showJerryDialog('🔔 Task notifications are now ON! I\'ll let you know when tasks are due soon!');
+                            startDueTaskChecker();
+                        })
+                        .catch(error => {
+                            console.error('Failed to enable notifications:', error);
+                            showJerryDialog('🔕 Notification permission denied. Please enable notifications in your browser settings.');
+                            gameState.taskNotificationsEnabled = false;
+                            saveGameState();
+                            updateUI();
+                        });
+                } else {
+                    // Fallback to original logic if Firebase not loaded
+                    showJerryDialog('🔔 Task notifications are now ON! I\'ll let you know when tasks are due soon!');
+                    requestNotificationPermission().then(permission => {
+                        if (permission === 'granted') {
+                            startDueTaskChecker();
+                        } else {
+                            showJerryDialog('🔕 Notification permission denied. Please enable notifications in your browser settings.');
+                            gameState.taskNotificationsEnabled = false;
+                            saveGameState();
+                            updateUI();
+                        }
+                    });
+                }
             } else {
-                showJerryDialog('🔕 Task notifications are now OFF. You can turn them back on anytime!');
+                // Use Firebase FCM to disable notifications
+                if (window.disableNotifications) {
+                    window.disableNotifications()
+                        .then(() => {
+                            console.log('FCM notifications disabled');
+                            showJerryDialog('🔕 Task notifications are now OFF. You can turn them back on anytime!');
+                        })
+                        .catch(error => {
+                            console.error('Failed to disable notifications:', error);
+                            showJerryDialog('🔕 Task notifications are now OFF. You can turn them back on anytime!');
+                        });
+                } else {
+                    showJerryDialog('🔕 Task notifications are now OFF. You can turn them back on anytime!');
+                }
             }
         }
 

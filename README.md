@@ -1,2 +1,2 @@
 # Task-Rock
-Pet rock meets productivity
+Pet Rock Meets Productivity 🚀

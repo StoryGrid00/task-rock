@@ -2400,6 +2400,28 @@
             updateUI();
         }
 
+        // Remove due soon tracking for a specific task
+        function removeDueSoonTracking(taskId) {
+            if (!gameState.notifiedTasks) {
+                return;
+            }
+            
+            // Remove all notification tracking entries for this task
+            gameState.notifiedTasks = gameState.notifiedTasks.filter(notificationKey => {
+                const keyTaskId = parseInt(notificationKey.split('_')[0]);
+                return keyTaskId !== taskId;
+            });
+            
+            // Clear any pending notifications for this task
+            if (gameState.pendingNotifications) {
+                gameState.pendingNotifications = gameState.pendingNotifications.filter(
+                    notification => notification.task.id !== taskId
+                );
+            }
+            
+            console.log(`Task Rock: Removed due soon tracking for task ${taskId}`);
+        }
+
         // Toggle menu
         function toggleMenu(index) {
             const menu = document.getElementById(`menu${index}`);
@@ -2691,38 +2713,288 @@
             }
         }
 
-        // Send push notification for task events using Firebase
+        // Aggressive notification system for iOS locked/sleeping devices
         function sendTaskNotification(eventType, task) {
-            // For now, we'll use browser notifications
-            // In production, you'd send these via your server to Firebase
+            console.log(`Task Rock: Notification request for "${task.title}" (${eventType})`);
+            
+            if (!gameState.taskNotificationsEnabled) {
+                console.log('Task Rock: Notifications disabled, skipping');
+                return;
+            }
+            
+            // Only send notifications for due-soon events, not for created/edited
+            if (eventType !== 'due_soon') {
+                console.log(`Task Rock: Skipping notification for "${eventType}" - only due-soon notifications are sent`);
+                return;
+            }
+            
+            console.log(`Task Rock: Initiating aggressive due-soon notification for "${task.title}"`);
+            
+            const title = 'Task Due Soon';
+            const message = `⏰ Your task "${task.title}" is due soon!`;
+            
+            // Strategy 1: Immediate notification attempt
+            sendSingleNotification(title, message, task);
+            
+            // Strategy 2: Redundant notifications with staggered timing (iOS reliability)
+            const redundantDelays = [30000, 60000, 120000]; // 30s, 1min, 2min delays
+            redundantDelays.forEach((delay, index) => {
+                setTimeout(() => {
+                    console.log(`Task Rock: Redundant notification attempt ${index + 1} for "${task.title}"`);
+                    sendSingleNotification(title, message, task, `redundant-${index + 1}`);
+                }, delay);
+            });
+            
+            // Strategy 3: Background sync notification (iOS background processing)
+            scheduleBackgroundNotification(title, message, task);
+            
+            // Strategy 4: Foreground notification fallback
+            scheduleForegroundFallback(title, message, task);
+            
+            console.log(`Task Rock: Aggressive notification strategy initiated for "${task.title}"`);
+        }
+        
+        // Send a single notification with enhanced options for iOS
+        function sendSingleNotification(title, message, task, suffix = '') {
             if ('Notification' in window && Notification.permission === 'granted') {
-                let title = '';
-                let message = '';
-                
-                switch(eventType) {
-                    case 'created':
-                        title = 'Task Created';
-                        message = `✅ New task created: "${task.title}"`;
-                        break;
-                    case 'edited':
-                        title = 'Task Updated';
-                        message = `✏️ Task updated: "${task.title}"`;
-                        break;
-                    case 'due_soon':
-                        title = 'Task Due Soon';
-                        message = `⏰ Your task "${task.title}" is due soon!`;
-                        break;
-                }
-                
-                new Notification(title, {
+                const notificationOptions = {
                     body: message,
                     icon: '/assets/images/jerry.png',
                     badge: '/assets/images/icon-192x192.png',
-                    tag: 'task-rock-notification'
-                });
+                    tag: `task-rock-${task.id}${suffix ? '-' + suffix : ''}`,
+                    requireInteraction: true, // Keep notification visible until user interacts
+                    silent: false, // Ensure sound/vibration
+                    renotify: true, // Allow re-notification with same tag
+                    timestamp: Date.now(),
+                    actions: [
+                        {
+                            action: 'view',
+                            title: 'View Task',
+                            icon: '/assets/images/jerry.png'
+                        },
+                        {
+                            action: 'snooze',
+                            title: 'Snooze 5min',
+                            icon: '/assets/images/jerry.png'
+                        }
+                    ],
+                    data: {
+                        taskId: task.id,
+                        eventType: 'task_notification',
+                        timestamp: Date.now()
+                    }
+                };
                 
-                console.log(`Task Rock: ${eventType} notification sent for "${task.title}"`);
+                try {
+                    const notification = new Notification(title, notificationOptions);
+                    
+                    // Enhanced notification event handling
+                    notification.onclick = function(event) {
+                        event.preventDefault();
+                        window.focus();
+                        this.close();
+                        
+                        // Scroll to the specific task
+                        const taskElement = document.querySelector(`[data-task-id="${task.id}"]`);
+                        if (taskElement) {
+                            taskElement.scrollIntoView({ behavior: 'smooth' });
+                        }
+                    };
+                    
+                    console.log(`Task Rock: Notification sent - "${title}"${suffix ? ' (' + suffix + ')' : ''}`);
+                } catch (error) {
+                    console.error('Task Rock: Notification failed:', error);
+                }
             }
+        }
+        
+        // Background sync notification for iOS background processing
+        function scheduleBackgroundNotification(title, message, task) {
+            if ('serviceWorker' in navigator && 'sync' in window.ServiceWorkerRegistration.prototype) {
+                navigator.serviceWorker.ready.then(registration => {
+                    // Store notification data for background sync
+                    const notificationData = {
+                        title: title,
+                        message: message,
+                        task: task,
+                        timestamp: Date.now(),
+                        attempts: 0
+                    };
+                    
+                    // Store in IndexedDB for background sync
+                    storeNotificationForBackgroundSync(notificationData);
+                    
+                    // Register background sync
+                    return registration.sync.register(`task-notification-${task.id}-${Date.now()}`);
+                }).then(() => {
+                    console.log('Task Rock: Background sync notification scheduled');
+                }).catch(error => {
+                    console.error('Task Rock: Background sync failed:', error);
+                });
+            }
+        }
+        
+        // Foreground notification fallback system
+        function scheduleForegroundFallback(title, message, task) {
+            // Check if app becomes active and show missed notifications
+            const fallbackKey = `fallback-${task.id}-${Date.now()}`;
+            
+            // Store fallback notification
+            if (!gameState.pendingNotifications) {
+                gameState.pendingNotifications = [];
+            }
+            
+            gameState.pendingNotifications.push({
+                key: fallbackKey,
+                title: title,
+                message: message,
+                task: task,
+                timestamp: Date.now(),
+                shown: false
+            });
+            
+            saveGameState();
+            
+            // Schedule fallback check
+            setTimeout(() => {
+                checkAndShowForegroundFallbacks();
+            }, 300000); // 5 minutes
+        }
+        
+        // Check and show foreground fallback notifications
+        function checkAndShowForegroundFallbacks() {
+            if (!gameState.pendingNotifications) return;
+            
+            const now = Date.now();
+            const fiveMinutesAgo = now - 300000;
+            
+            gameState.pendingNotifications.forEach(notification => {
+                if (!notification.shown && notification.timestamp > fiveMinutesAgo) {
+                    // Show as in-app notification if main notification might have been missed
+                    showInAppNotification(notification.title, notification.message);
+                    notification.shown = true;
+                }
+            });
+            
+            // Clean up old notifications
+            gameState.pendingNotifications = gameState.pendingNotifications.filter(
+                notification => notification.timestamp > fiveMinutesAgo
+            );
+            
+            saveGameState();
+        }
+        
+        // In-app notification system for fallback
+        function showInAppNotification(title, message) {
+            // Create in-app notification element
+            const notificationElement = document.createElement('div');
+            notificationElement.className = 'in-app-notification';
+            notificationElement.innerHTML = `
+                <div class="notification-content">
+                    <strong>${title}</strong>
+                    <p>${message}</p>
+                    <button onclick="this.parentElement.parentElement.remove()">×</button>
+                </div>
+            `;
+            
+            // Add styles if not already present
+            if (!document.querySelector('#in-app-notification-styles')) {
+                const styles = document.createElement('style');
+                styles.id = 'in-app-notification-styles';
+                styles.textContent = `
+                    .in-app-notification {
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        background: #34c759;
+                        color: white;
+                        padding: 15px;
+                        border-radius: 10px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                        z-index: 10000;
+                        max-width: 300px;
+                        animation: slideIn 0.3s ease-out;
+                    }
+                    
+                    .notification-content {
+                        position: relative;
+                    }
+                    
+                    .notification-content button {
+                        position: absolute;
+                        top: -5px;
+                        right: -5px;
+                        background: rgba(255,255,255,0.3);
+                        border: none;
+                        color: white;
+                        width: 25px;
+                        height: 25px;
+                        border-radius: 50%;
+                        cursor: pointer;
+                    }
+                    
+                    @keyframes slideIn {
+                        from { transform: translateX(100%); opacity: 0; }
+                        to { transform: translateX(0); opacity: 1; }
+                    }
+                `;
+                document.head.appendChild(styles);
+            }
+            
+            document.body.appendChild(notificationElement);
+            
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+                if (notificationElement.parentElement) {
+                    notificationElement.remove();
+                }
+            }, 10000);
+            
+            console.log('Task Rock: In-app fallback notification shown');
+        }
+        
+        // Store notification data for background sync
+        function storeNotificationForBackgroundSync(notificationData) {
+            // Use localStorage as fallback for IndexedDB
+            try {
+                const existingData = JSON.parse(localStorage.getItem('task-rock-pending-notifications') || '[]');
+                existingData.push(notificationData);
+                
+                // Keep only last 10 notifications to prevent storage bloat
+                const recentData = existingData.slice(-10);
+                localStorage.setItem('task-rock-pending-notifications', JSON.stringify(recentData));
+                
+                console.log('Task Rock: Notification stored for background sync');
+            } catch (error) {
+                console.error('Task Rock: Failed to store notification for background sync:', error);
+            }
+        }
+        
+        // Enhanced due task checking with aggressive scheduling
+        function startDueTaskChecker() {
+            console.log('Task Rock: Starting aggressive due task checker for iOS reliability');
+            
+            // Clear any existing intervals
+            if (window.taskRockDueTaskInterval) {
+                clearInterval(window.taskRockDueTaskInterval);
+            }
+            
+            // Primary check every 2 minutes (aggressive for iOS)
+            window.taskRockDueTaskInterval = setInterval(() => {
+                checkDueTasksAndNotify();
+                checkAndShowForegroundFallbacks();
+            }, 120000); // 2 minutes
+            
+            // Secondary check every 5 minutes (redundancy)
+            setInterval(() => {
+                console.log('Task Rock: Secondary due task check');
+                checkDueTasksAndNotify();
+            }, 300000); // 5 minutes
+            
+            // Immediate check
+            checkDueTasksAndNotify();
+            
+            console.log('Task Rock: Aggressive notification system active');
         }
 
         // Check for due tasks and send notifications

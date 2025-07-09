@@ -100,12 +100,20 @@
         // Disable notifications function
         const disableNotifications = async () => {
             try {
-                await deleteToken(messaging);
+                // Get the current token first
+                const currentToken = localStorage.getItem('fcm-token');
+                if (currentToken) {
+                    await deleteToken(messaging, currentToken);
+                    console.log('FCM token deleted successfully');
+                }
                 localStorage.removeItem('fcm-token');
-                console.log('FCM token deleted and notifications disabled');
+                console.log('FCM notifications disabled');
+                return true;
             } catch (error) {
                 console.error('Error disabling notifications:', error);
-                throw error;
+                // Still remove from localStorage even if deleteToken fails
+                localStorage.removeItem('fcm-token');
+                return false;
             }
         };
         
@@ -1632,6 +1640,17 @@
     </style>
 </head>
 <body>
+    <!-- Audio elements for celebration sounds -->
+    <audio id="taskCompleteSound" preload="auto">
+        <source src="assets/sounds/task_complete.wav" type="audio/wav">
+        Your browser does not support the audio element.
+    </audio>
+    
+    <audio id="dailyChallengeCompleteSound" preload="auto">
+        <source src="assets/sounds/daily_challenge_complete.wav" type="audio/wav">
+        Your browser does not support the audio element.
+    </audio>
+
     <div class="container">
         <!-- Logo Section -->
         <div class="logo-section">
@@ -2190,6 +2209,35 @@
             closeModal();
         }
 
+        // Audio feedback functions
+        function playTaskCompleteSound() {
+            try {
+                const audio = document.getElementById('taskCompleteSound');
+                if (audio) {
+                    audio.currentTime = 0; // Reset to beginning
+                    audio.play().catch(error => {
+                        console.log('Task Rock: Audio play failed (user interaction required):', error);
+                    });
+                }
+            } catch (error) {
+                console.error('Task Rock: Error playing task complete sound:', error);
+            }
+        }
+
+        function playDailyChallengeCompleteSound() {
+            try {
+                const audio = document.getElementById('dailyChallengeCompleteSound');
+                if (audio) {
+                    audio.currentTime = 0; // Reset to beginning
+                    audio.play().catch(error => {
+                        console.log('Task Rock: Audio play failed (user interaction required):', error);
+                    });
+                }
+            } catch (error) {
+                console.error('Task Rock: Error playing daily challenge complete sound:', error);
+            }
+        }
+
         // Complete task
         function completeTask(index) {
             const task = gameState.tasks[index];
@@ -2252,6 +2300,9 @@
             
             // Add short animation for gamification
             showShortAnimation();
+            
+            // Play celebration sound for task completion
+            playTaskCompleteSound();
             
             // Trigger Jerry's response to task completion
             setTimeout(() => {
@@ -3706,6 +3757,10 @@
             if (challenge.progress >= challenge.target && !gameState.dailyChallengeCompleted) {
                 gameState.dailyChallengeCompleted = true;
                 gameState.taskPoints += challenge.reward;
+                
+                // Play celebration sound for daily challenge completion
+                playDailyChallengeCompleteSound();
+                
                 showCongratsMessage(`⚡ Daily Challenge Complete!\n${challenge.name}\n+${challenge.reward} bonus points!`, challenge.reward);
                 return true; // Return true to indicate daily challenge was completed
             }

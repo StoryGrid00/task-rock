@@ -15,17 +15,30 @@ const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Background message ', payload);
-  const notificationTitle = payload.notification.title;
+  
+  const notificationTitle = payload.notification?.title || payload.data?.title || 'Task Rock';
+  const notificationBody = payload.notification?.body || payload.data?.body || 'You have a task due soon!';
+  
   const notificationOptions = {
-    body: payload.notification.body,
+    body: notificationBody,
     icon: '/assets/images/jerry.png',
     badge: '/assets/images/icon-192x192.png',
     tag: 'task-rock-notification',
     requireInteraction: true,
+    renotify: true,
+    silent: false,
+    vibrate: [200, 100, 200],
+    timestamp: Date.now(),
+    data: {
+      url: '/',
+      timestamp: Date.now(),
+      ...payload.data
+    },
     actions: [
       {
         action: 'view',
-        title: 'View Tasks'
+        title: 'View Tasks',
+        icon: '/assets/images/icon-192x192.png'
       },
       {
         action: 'dismiss',
@@ -34,7 +47,7 @@ messaging.onBackgroundMessage((payload) => {
     ]
   };
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
+  return self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
 // Handle notification clicks

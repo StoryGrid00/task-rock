@@ -272,7 +272,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            z-index: 2000;
+            z-index: 15000;
             opacity: 0;
             transition: opacity 0.3s ease;
         }
@@ -300,6 +300,8 @@
             font-weight: 600;
             color: #333;
             margin-bottom: 10px;
+            white-space: pre-line;
+            line-height: 1.4;
         }
 
         .congrats-points {
@@ -1641,11 +1643,6 @@
 </head>
 <body>
     <!-- Audio elements for celebration sounds -->
-    <audio id="taskCompleteSound" preload="auto">
-        <source src="assets/sounds/task_complete.wav" type="audio/wav">
-        Your browser does not support the audio element.
-    </audio>
-    
     <audio id="dailyChallengeCompleteSound" preload="auto">
         <source src="assets/sounds/daily_challenge_complete.wav" type="audio/wav">
         Your browser does not support the audio element.
@@ -2210,20 +2207,6 @@
         }
 
         // Audio feedback functions
-        function playTaskCompleteSound() {
-            try {
-                const audio = document.getElementById('taskCompleteSound');
-                if (audio) {
-                    audio.currentTime = 0; // Reset to beginning
-                    audio.play().catch(error => {
-                        console.log('Task Rock: Audio play failed (user interaction required):', error);
-                    });
-                }
-            } catch (error) {
-                console.error('Task Rock: Error playing task complete sound:', error);
-            }
-        }
-
         function playDailyChallengeCompleteSound() {
             try {
                 const audio = document.getElementById('dailyChallengeCompleteSound');
@@ -2300,9 +2283,6 @@
             
             // Add short animation for gamification
             showShortAnimation();
-            
-            // Play celebration sound for task completion
-            playTaskCompleteSound();
             
             // Trigger Jerry's response to task completion
             setTimeout(() => {

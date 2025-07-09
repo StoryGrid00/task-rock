@@ -117,6 +117,10 @@
             }
         };
         
+        // Attach functions to window object for global access
+        window.enableNotifications = enableNotifications;
+        window.disableNotifications = disableNotifications;
+        
         // Handle foreground messages
         onMessage(messaging, (payload) => {
             console.log('Foreground message received:', payload);

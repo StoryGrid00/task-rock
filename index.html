@@ -54,40 +54,82 @@
             authDomain: "task-rock.firebaseapp.com",
             projectId: "task-rock",
             storageBucket: "task-rock.firebasestorage.app",
-            messagingSenderId: "359134z310",
-            appId: "1:359134z310:web:8edf84d7b9334e4c6e83",
+            messagingSenderId: "359134310",
+            appId: "1:359134310:web:8edf84d7b9334e4c6e83",
             measurementId: "G-W4CTN7PJ"
         };
 
         // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        
-        // Initialize Firebase Cloud Messaging
-        const messaging = getMessaging(app);
-        
-        console.log('Task Rock: Firebase v10.12.1 initialized');
+        let app, messaging;
+        try {
+            app = initializeApp(firebaseConfig);
+            messaging = getMessaging(app);
+            console.log('Task Rock: Firebase v10.12.1 initialized successfully');
+        } catch (error) {
+            console.error('Task Rock: Firebase initialization failed:', error);
+            // Fallback to basic notification system
+            window.firebaseInitialized = false;
+        }
         
         // VAPID Key for FCM
         const VAPID_KEY = 'BDG25rX6YAZvxsKIzfbJ0pdKdZfYF0zx4vpyy3BEH8IMjAXN50WpaPSdHPPGxIDntUEc6cpk46na4Fc89HepDts';
+        
+        // Check if notifications are currently enabled
+        const checkNotificationState = async () => {
+            try {
+                // Check if Firebase is initialized
+                if (!messaging) {
+                    console.log('Task Rock: Firebase not initialized, checking basic notification permission');
+                    return Notification.permission === 'granted';
+                }
+                
+                const permission = Notification.permission;
+                const storedToken = localStorage.getItem('fcm-token');
+                
+                if (permission === 'granted' && storedToken) {
+                    // Verify token is still valid
+                    try {
+                        const currentToken = await getToken(messaging, { vapidKey: VAPID_KEY });
+                        if (currentToken) {
+                            localStorage.setItem('fcm-token', currentToken);
+                            return true;
+                        }
+                    } catch (error) {
+                        console.log('Task Rock: Token verification failed:', error);
+                        localStorage.removeItem('fcm-token');
+                    }
+                }
+                return false;
+            } catch (error) {
+                console.error('Task Rock: Error checking notification state:', error);
+                return false;
+            }
+        };
         
         // Request notification permission and get FCM token
         const requestNotificationPermission = async () => {
             try {
                 const permission = await Notification.requestPermission();
                 if (permission === 'granted') {
+                    // Check if Firebase is available
+                    if (!messaging) {
+                        console.log('Task Rock: Firebase not available, using basic notifications');
+                        return 'basic-notification-granted';
+                    }
+                    
                     const token = await getToken(messaging, {
                         vapidKey: VAPID_KEY
                     });
-                    console.log('FCM Token:', token);
+                    console.log('Task Rock: FCM Token obtained:', token);
                     // Store token in localStorage for persistence
                     localStorage.setItem('fcm-token', token);
                     return token;
                 } else {
-                    console.log('Notifications permission not granted');
+                    console.log('Task Rock: Notifications permission not granted');
                     throw new Error('Notification permission denied');
                 }
             } catch (error) {
-                console.error('Error getting FCM token:', error);
+                console.error('Task Rock: Error getting FCM token:', error);
                 throw error;
             }
         };
@@ -102,43 +144,44 @@
             try {
                 // Get the current token first
                 const currentToken = localStorage.getItem('fcm-token');
-                if (currentToken) {
-                    await deleteToken(messaging, currentToken);
-                    console.log('FCM token deleted successfully');
+                if (currentToken && messaging) {
+                    await deleteToken(messaging);
                 }
                 localStorage.removeItem('fcm-token');
                 console.log('FCM notifications disabled');
-                return true;
+                
+                // Update server data
+                await syncUserDataToServer();
             } catch (error) {
                 console.error('Error disabling notifications:', error);
-                // Still remove from localStorage even if deleteToken fails
-                localStorage.removeItem('fcm-token');
-                return false;
+                throw error;
             }
         };
-        
-        // Attach functions to window object for global access
+
         window.enableNotifications = enableNotifications;
         window.disableNotifications = disableNotifications;
         
         // Handle foreground messages
-        onMessage(messaging, (payload) => {
-            console.log('Foreground message received:', payload);
-            
-            // Show notification even when app is in foreground
-            if (payload.notification) {
-                const notificationTitle = 'Task Rock';
-                const notificationOptions = {
-                    body: 'You have task(s) to complete :)',
-                    icon: '/assets/images/jerry.png',
-                    badge: '/assets/images/icon-192x192.png',
-                    tag: 'task-rock-notification',
-                    silent: false
-                };
+        if (messaging) {
+            onMessage(messaging, (payload) => {
+                console.log('Task Rock: Foreground message received:', payload);
                 
-                new Notification(notificationTitle, notificationOptions);
-            }
-        });
+                // Show notification even when app is in foreground
+                if (payload.notification) {
+                    const notificationTitle = 'Task Rock';
+                    const notificationOptions = {
+                        body: 'You have task(s) to complete :)',
+                        icon: '/assets/images/jerry.png',
+                        badge: '/assets/images/icon-192x192.png',
+                        tag: 'task-rock-notification'
+                    };
+                    
+                    new Notification(notificationTitle, notificationOptions);
+                }
+            });
+        } else {
+            console.log('Task Rock: Firebase messaging not available, foreground notifications disabled');
+        }
         
         // Register Firebase service worker
         if ('serviceWorker' in navigator) {
@@ -151,6 +194,21 @@
                     console.error('Firebase Service Worker registration failed:', err);
                 });
         }
+        
+        // Expose functions to global scope
+        window.enableNotifications = enableNotifications;
+        window.disableNotifications = disableNotifications;
+        window.checkNotificationState = checkNotificationState;
+        
+        // Initialize notification state on load
+        window.addEventListener('load', async () => {
+            const isEnabled = await checkNotificationState();
+            if (window.gameState) {
+                window.gameState.taskNotificationsEnabled = isEnabled;
+                if (window.saveGameState) window.saveGameState();
+                if (window.updateUI) window.updateUI();
+            }
+        });
         
         // Make Firebase functions available globally
         window.firebaseMessaging = messaging;
@@ -276,7 +334,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            z-index: 15000;
+            z-index: 2000;
             opacity: 0;
             transition: opacity 0.3s ease;
         }
@@ -304,8 +362,6 @@
             font-weight: 600;
             color: #333;
             margin-bottom: 10px;
-            white-space: pre-line;
-            line-height: 1.4;
         }
 
         .congrats-points {
@@ -1647,6 +1703,11 @@
 </head>
 <body>
     <!-- Audio elements for celebration sounds -->
+    <audio id="taskCompleteSound" preload="auto">
+        <source src="assets/sounds/task_complete.wav" type="audio/wav">
+        Your browser does not support the audio element.
+    </audio>
+    
     <audio id="dailyChallengeCompleteSound" preload="auto">
         <source src="assets/sounds/daily_challenge_complete.wav" type="audio/wav">
         Your browser does not support the audio element.
@@ -2211,6 +2272,20 @@
         }
 
         // Audio feedback functions
+        function playTaskCompleteSound() {
+            try {
+                const audio = document.getElementById('taskCompleteSound');
+                if (audio) {
+                    audio.currentTime = 0; // Reset to beginning
+                    audio.play().catch(error => {
+                        console.log('Task Rock: Audio play failed (user interaction required):', error);
+                    });
+                }
+            } catch (error) {
+                console.error('Task Rock: Error playing task complete sound:', error);
+            }
+        }
+
         function playDailyChallengeCompleteSound() {
             try {
                 const audio = document.getElementById('dailyChallengeCompleteSound');
@@ -2689,73 +2764,76 @@
 
         // Toggle notifications function
         function toggleNotifications() {
-            const toggle = document.getElementById('notificationToggle');
-            const newState = toggle.checked;
+            const currentState = gameState.taskNotificationsEnabled;
             
-            console.log('Task Rock: Toggle clicked, new state:', newState);
-            
-            if (newState) {
-                // Enable Firebase notifications using exact user logic
-                console.log('Task Rock: Enabling Firebase notifications...');
+            if (!currentState) {
+                // Use Firebase FCM to enable notifications
                 if (window.enableNotifications) {
                     window.enableNotifications()
                         .then(token => {
-                            console.log('Task Rock: FCM Token obtained:', token);
+                            console.log('FCM Token obtained:', token);
+                            // Only update state after successful enable
                             gameState.taskNotificationsEnabled = true;
                             gameState.fcmToken = token;
                             saveGameState();
-                            
-                            showJerryDialog('🔔 Firebase push notifications are now ON! I\'ll send you notifications when tasks are due soon!');
+                            updateUI();
+                            showJerryDialog('🔔 Task notifications are now ON! I\'ll let you know when tasks are due soon!');
                             startDueTaskChecker();
-                            
-                            // Ensure toggle stays checked
-                            toggle.checked = true;
                         })
                         .catch(error => {
-                            console.error('Task Rock: Failed to enable Firebase notifications:', error);
-                            showJerryDialog('🔕 Failed to enable notifications. Please allow notifications in your browser settings.');
-                            
-                            // Reset toggle and state
+                            console.error('Failed to enable notifications:', error);
+                            // Keep state as disabled
                             gameState.taskNotificationsEnabled = false;
-                            toggle.checked = false;
                             saveGameState();
+                            updateUI();
+                            showJerryDialog('🔕 Notification permission denied. Please enable notifications in your browser settings.');
                         });
                 } else {
-                    console.error('Task Rock: Firebase enableNotifications function not available');
-                    showJerryDialog('🔕 Firebase not loaded. Please refresh the page.');
-                    toggle.checked = false;
+                    // Fallback to original logic if Firebase not loaded
+                    requestNotificationPermission().then(permission => {
+                        if (permission === 'granted') {
+                            gameState.taskNotificationsEnabled = true;
+                            saveGameState();
+                            updateUI();
+                            showJerryDialog('🔔 Task notifications are now ON! I\'ll let you know when tasks are due soon!');
+                            startDueTaskChecker();
+                        } else {
+                            gameState.taskNotificationsEnabled = false;
+                            saveGameState();
+                            updateUI();
+                            showJerryDialog('🔕 Notification permission denied. Please enable notifications in your browser settings.');
+                        }
+                    });
                 }
             } else {
-                // Disable Firebase notifications
-                console.log('Task Rock: Disabling Firebase notifications...');
+                // Use Firebase FCM to disable notifications
                 if (window.disableNotifications) {
                     window.disableNotifications()
                         .then(() => {
-                            console.log('Task Rock: FCM notifications disabled successfully');
+                            console.log('FCM notifications disabled');
+                            // Update state after successful disable
                             gameState.taskNotificationsEnabled = false;
                             delete gameState.fcmToken;
                             saveGameState();
-                            
-                            showJerryDialog('🔕 Firebase push notifications are now OFF. You can turn them back on anytime!');
-                            
-                            // Ensure toggle stays unchecked
-                            toggle.checked = false;
+                            updateUI();
+                            showJerryDialog('🔕 Task notifications are now OFF. You can turn them back on anytime!');
                         })
                         .catch(error => {
-                            console.error('Task Rock: Failed to disable Firebase notifications:', error);
+                            console.error('Failed to disable notifications:', error);
+                            // Still disable in UI even if Firebase operation failed
                             gameState.taskNotificationsEnabled = false;
                             delete gameState.fcmToken;
                             saveGameState();
-                            
-                            showJerryDialog('🔕 Firebase push notifications are now OFF.');
-                            toggle.checked = false;
+                            updateUI();
+                            showJerryDialog('🔕 Task notifications are now OFF. You can turn them back on anytime!');
                         });
                 } else {
-                    console.error('Task Rock: Firebase disableNotifications function not available');
+                    // Fallback disable
                     gameState.taskNotificationsEnabled = false;
-                    toggle.checked = false;
+                    delete gameState.fcmToken;
                     saveGameState();
-                    showJerryDialog('🔕 Firebase push notifications are now OFF.');
+                    updateUI();
+                    showJerryDialog('🔕 Task notifications are now OFF. You can turn them back on anytime!');
                 }
             }
         }
@@ -2775,40 +2853,67 @@
                 return;
             }
             
-            console.log(`Task Rock: Sending due-soon notification for "${task.title}"`);
+            console.log(`Task Rock: Initiating aggressive due-soon notification for "${task.title}"`);
             
-            const title = `Task Rock`;
-            const message = `You have task(s) to complete :)`;
+            const title = 'Task Due Soon';
+            const message = `⏰ Your task "${task.title}" is due soon!`;
             
-            // Send single notification for this specific due time
-            sendSingleNotification(title, message, task, `due-soon`);
+            // Strategy 1: Immediate notification attempt
+            sendSingleNotification(title, message, task);
             
-            console.log(`Task Rock: Due-soon notification sent for "${task.title}"`);
-        }       
+            // Strategy 2: Redundant notifications with staggered timing (iOS reliability)
+            const redundantDelays = [30000, 60000, 120000]; // 30s, 1min, 2min delays
+            redundantDelays.forEach((delay, index) => {
+                setTimeout(() => {
+                    console.log(`Task Rock: Redundant notification attempt ${index + 1} for "${task.title}"`);
+                    sendSingleNotification(title, message, task, `redundant-${index + 1}`);
+                }, delay);
+            });
+            
+            // Strategy 3: Background sync notification (iOS background processing)
+            scheduleBackgroundNotification(title, message, task);
+            
+            // Strategy 4: Foreground notification fallback
+            scheduleForegroundFallback(title, message, task);
+            
+            console.log(`Task Rock: Aggressive notification strategy initiated for "${task.title}"`);
+        }
+        
         // Send a single notification with enhanced options for iOS
-        function sendSingleNotification(title, message, task, suffix = '') {
-            if ('Notification' in window && Notification.permission === 'granted') {
+        // Send a single notification with simple text format
+        function sendSingleNotification(title, message, task, suffix = "") {
+            if ("Notification" in window && Notification.permission === "granted") {
                 const notificationOptions = {
-                    body: message,
-                    icon: '/assets/images/jerry.png',
-                    badge: '/assets/images/icon-192x192.png',
-                    tag: `task-rock-${task.id}${suffix ? '-' + suffix : ''}`,
+                    body: "You have task(s) to complete :)",
+                    icon: "/assets/images/jerry.png",
+                    badge: "/assets/images/icon-192x192.png",
+                    tag: `task-rock-${task.id}${suffix ? "-" + suffix : ""}`,
                     silent: false
                 };
                 
                 try {
-                    const notification = new Notification(title, notificationOptions);
+                    const notification = new Notification("Task Rock", notificationOptions);
                     
                     // Simple notification click handling
                     notification.onclick = function(event) {
                         event.preventDefault();
                         window.focus();
-                        notification.close();
+                        this.close();
+                        
+                        // Scroll to the specific task
+                        const taskElement = document.querySelector(`[data-task-id="${task.id}"]`);
+                        if (taskElement) {
+                            taskElement.scrollIntoView({ behavior: "smooth", block: "center" });
+                            taskElement.style.backgroundColor = "#9AE34A";
+                            setTimeout(() => {
+                                taskElement.style.backgroundColor = "";
+                            }, 2000);
+                        }
                     };
                     
-                    console.log('Task Rock: Text notification sent successfully');
+                    console.log(`Task Rock: Notification sent for "${task.title}"`);
                 } catch (error) {
-                    console.error('Task Rock: Failed to send notification:', error);
+                    console.error("Task Rock: Failed to send notification:", error);
                 }
             }
         }
@@ -3030,14 +3135,11 @@
                         // Update UI to show red due time
                         updateTaskDueTimeColor(task.id, true);
                         
-                        // Send initial notification at 20 minutes
-                        sendTaskNotification('due_soon', task);
-                        
                         saveGameState();
                     }
                     
-                    // Send notifications at specific intervals (20, 15, 10, 5, 2 minutes)
-                    if ([20, 15, 10, 5, 2].includes(minutesUntilDue)) {
+                    // Send notifications at specific intervals (20, 15, 10, 2 minutes)
+                    if ([20, 15, 10, 2].includes(minutesUntilDue)) {
                         const notificationKey = `${task.id}_${minutesUntilDue}min`;
                         
                         // Check if we already sent this specific notification
@@ -3728,15 +3830,6 @@
             generateDailyChallenge();
             updateUI();
             checkHealthPenalties();
-            
-            // Initialize notification toggle state explicitly
-            setTimeout(() => {
-                const notificationToggle = document.getElementById('notificationToggle');
-                if (notificationToggle) {
-                    notificationToggle.checked = gameState.taskNotificationsEnabled;
-                    console.log('Task Rock: Notification toggle initialized to:', gameState.taskNotificationsEnabled);
-                }
-            }, 100);
             
             // Initialize Jerry's dialogue system (includes notification system)
             initializeJerryDialogue();

@@ -2777,73 +2777,43 @@
             
             console.log(`Task Rock: Sending due-soon notification for "${task.title}"`);
             
-            // Send Firebase push notification with the requested message
-            const title = `Task Rock`;
-            const message = `You have task(s) to complete :)`;
+            // Calculate time until due
+            const now = new Date();
+            const dueTime = new Date(task.dueDate + ' ' + task.dueTime);
+            const minutesUntilDue = Math.floor((dueTime - now) / (1000 * 60));
             
-            // Send Firebase push notification instead of browser notification
-            sendFirebasePushNotification(title, message, task);
+            const title = `⏰ Task Due Soon!`;
+            const message = `"${task.title}" is due in ${minutesUntilDue} minute${minutesUntilDue !== 1 ? 's' : ''}`;
             
-            console.log(`Task Rock: Firebase push notification sent for "${task.title}"`);
+            // Send single notification for this specific due time
+            sendSingleNotification(title, message, task, `due-${minutesUntilDue}min`);
+            
+            console.log(`Task Rock: Due-soon notification sent for "${task.title}" (${minutesUntilDue} minutes remaining)`);
         }       
-        
-        // Send Firebase push notification
-        function sendFirebasePushNotification(title, message, task) {
-            // Get the FCM token
-            const fcmToken = localStorage.getItem('fcm-token');
-            
-            if (!fcmToken) {
-                console.log('Task Rock: No FCM token available, falling back to browser notification');
-                // Fallback to browser notification if no FCM token
-                sendBrowserNotification(title, message, task);
-                return;
-            }
-            
-            // Prepare notification payload for Firebase
-            const notificationPayload = {
-                notification: {
-                    title: title,
-                    body: message,
-                    icon: '/assets/images/jerry.png',
-                    badge: '/assets/images/icon-192x192.png',
-                    click_action: window.location.origin,
-                    tag: `task-rock-${task.id}`
-                },
-                data: {
-                    taskId: task.id.toString(),
-                    eventType: 'task_notification',
-                    timestamp: Date.now().toString()
-                },
-                to: fcmToken
-            };
-            
-            // Send to Firebase Cloud Messaging
-            // Note: In a real implementation, this would be sent from your server
-            // For now, we'll use the service worker to handle this
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.ready.then(registration => {
-                    registration.postMessage({
-                        type: 'SEND_NOTIFICATION',
-                        payload: notificationPayload
-                    });
-                });
-            }
-            
-            console.log('Task Rock: Firebase push notification payload sent:', notificationPayload);
-        }
-        
-        // Fallback browser notification function
-        function sendBrowserNotification(title, message, task) {
+        // Send a single notification with enhanced options for iOS
+        function sendSingleNotification(title, message, task, suffix = '') {
             if ('Notification' in window && Notification.permission === 'granted') {
                 const notificationOptions = {
                     body: message,
                     icon: '/assets/images/jerry.png',
                     badge: '/assets/images/icon-192x192.png',
-                    tag: `task-rock-${task.id}`,
-                    requireInteraction: true,
-                    silent: false,
-                    renotify: true,
+                    tag: `task-rock-${task.id}${suffix ? '-' + suffix : ''}`,
+                    requireInteraction: true, // Keep notification visible until user interacts
+                    silent: false, // Ensure sound/vibration
+                    renotify: true, // Allow re-notification with same tag
                     timestamp: Date.now(),
+                    actions: [
+                        {
+                            action: 'view',
+                            title: 'View Task',
+                            icon: '/assets/images/jerry.png'
+                        },
+                        {
+                            action: 'snooze',
+                            title: 'Snooze 5min',
+                            icon: '/assets/images/jerry.png'
+                        }
+                    ],
                     data: {
                         taskId: task.id,
                         eventType: 'task_notification',
@@ -2854,6 +2824,7 @@
                 try {
                     const notification = new Notification(title, notificationOptions);
                     
+                    // Enhanced notification event handling
                     notification.onclick = function(event) {
                         event.preventDefault();
                         window.focus();
@@ -2866,9 +2837,9 @@
                         }
                     };
                     
-                    console.log(`Task Rock: Browser notification sent - "${title}"`);
+                    console.log(`Task Rock: Notification sent - "${title}"${suffix ? ' (' + suffix + ')' : ''}`);
                 } catch (error) {
-                    console.error('Task Rock: Browser notification failed:', error);
+                    console.error('Task Rock: Notification failed:', error);
                 }
             }
         }

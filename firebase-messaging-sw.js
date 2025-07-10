@@ -13,13 +13,11 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Handle background messages (when app is not in focus)
 messaging.onBackgroundMessage((payload) => {
-  console.log('[firebase-messaging-sw.js] Background message received:', payload);
+  console.log('[firebase-messaging-sw.js] Background message ', payload);
   
-  // Use the standardized notification message
-  const notificationTitle = 'Task Rock';
-  const notificationBody = 'You have task(s) to complete :)';
+  const notificationTitle = payload.notification?.title || payload.data?.title || 'Task Rock';
+  const notificationBody = payload.notification?.body || payload.data?.body || 'You have a task due soon!';
   
   const notificationOptions = {
     body: notificationBody,
@@ -50,33 +48,6 @@ messaging.onBackgroundMessage((payload) => {
   };
 
   return self.registration.showNotification(notificationTitle, notificationOptions);
-});
-
-// Handle messages from main app for sending notifications
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SEND_NOTIFICATION') {
-    const payload = event.data.payload;
-    
-    // Show notification with standardized message
-    const notificationTitle = 'Task Rock';
-    const notificationBody = 'You have task(s) to complete :)';
-    
-    const notificationOptions = {
-      body: notificationBody,
-      icon: '/assets/images/jerry.png',
-      badge: '/assets/images/icon-192x192.png',
-      tag: 'task-rock-notification',
-      requireInteraction: true,
-      renotify: true,
-      silent: false,
-      vibrate: [200, 100, 200],
-      timestamp: Date.now(),
-      data: payload.data || {}
-    };
-    
-    self.registration.showNotification(notificationTitle, notificationOptions);
-    console.log('Task Rock: Push notification sent via service worker');
-  }
 });
 
 // Handle notification clicks
